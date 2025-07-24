@@ -8,7 +8,17 @@ import (
 	"gradientfit/backend/utils"
 
 	"github.com/gofiber/fiber/v2"
+	"golang.org/x/crypto/bcrypt"
 )
+
+func HashPassword(plain string) (string, error) {
+	bytes, err := bcrypt.GenerateFromPassword([]byte(plain), bcrypt.DefaultCost)
+	return string(bytes), err
+}
+
+func CheckPassword(hash, plain string) error {
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(plain))
+}
 
 func SignUp(c *fiber.Ctx) error {
 	type request struct {
@@ -23,11 +33,16 @@ func SignUp(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "cannot parse JSON"})
 	}
 
+	hashedPassword, err := HashPassword(body.Password)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "could not hash password"})
+	}
+
 	user := models.User{
 		Name:     body.Name,
 		Username: body.Username,
 		Email:    body.Email,
-		Password: body.Password,
+		Password: hashedPassword,
 	}
 
 	if err := database.DB.Create(&user).Error; err != nil {
@@ -58,7 +73,7 @@ func Login(c *fiber.Ctx) error {
 		return c.Status(401).JSON(fiber.Map{"error": "invalid credentials"})
 	}
 
-	if user.Password != body.Password {
+	if err := CheckPassword(user.Password, body.Password); err != nil {
 		return c.Status(401).JSON(fiber.Map{"error": "invalid credentials"})
 	}
 
@@ -86,14 +101,11 @@ func GetUser(c *fiber.Ctx) error {
 	}
 
 	var user models.User
-	if err := database.DB.First(&user, id).Error; err != nil {
+	if err := database.DB.
+		Select("id", "created_at", "updated_at", "name", "username", "email").
+		First(&user, id).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "user not found"})
 	}
 
-	return c.JSON(fiber.Map{
-		"id":       user.ID,
-		"name":     user.Name,
-		"username": user.Username,
-		"email":    user.Email,
-	})
+	return c.JSON(user)
 }
